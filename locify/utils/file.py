@@ -127,6 +127,13 @@ class GitRepoUtils:
         return build_tree_string(tree)
 
 
+def get_modified_time(abs_path: str) -> int:
+    if not Path(abs_path).exists():
+        return -1
+
+    return int(Path(abs_path).stat().st_mtime)
+
+
 def read_text(abs_path: str) -> str:
     if has_image_extension(abs_path):
         return ''  # Not support image files yet!
