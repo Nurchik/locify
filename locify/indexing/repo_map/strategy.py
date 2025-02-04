@@ -25,8 +25,11 @@ class RepoMapStrategy(FullMapStrategy):
         rel_dir_path: str | None = None,
         mentioned_rel_files: set | None = None,
         mentioned_idents: set | None = None,
+        _all_abs_files: list[str] | None = None,
     ) -> list[ParsedTag]:
-        if rel_dir_path:
+        if _all_abs_files is not None:
+            all_abs_files = _all_abs_files
+        elif rel_dir_path:
             all_abs_files = self.git_utils.get_absolute_tracked_files_in_directory(
                 rel_dir_path=rel_dir_path,
                 depth=depth,

@@ -5,7 +5,8 @@ from pathlib import Path
 
 from diskcache import Cache
 from grep_ast import filename_to_lang
-from tree_sitter_languages import get_language, get_parser
+from tree_sitter_language_pack import get_language, get_parser
+from tree_sitter import Language, Parser
 
 from locify.utils.file import get_modified_time, read_text
 
@@ -25,8 +26,12 @@ class TreeSitterParser:
     TAGS_CACHE_VERSION = 3
     TAGS_CACHE_DIR = f'.cache.tags.v{TAGS_CACHE_VERSION}'
 
-    def __init__(self, cache_root_dir: str) -> None:
-        self.load_tags_cache(cache_root_dir)
+    def __init__(self, cache_root_dir: str, no_cache: bool = False) -> None:
+        self.no_cache = no_cache
+        if not self.no_cache:
+            self.load_tags_cache(cache_root_dir)
+        else:
+            self.tags_cache = dict()
 
     def load_tags_cache(self, abs_root_dir: str) -> None:
         cache_path = Path(abs_root_dir) / self.TAGS_CACHE_DIR
@@ -50,27 +55,49 @@ class TreeSitterParser:
         self.tags_cache[cache_key] = {'mtime': mtime, 'data': data}
         return data
 
-    def get_tags_raw(self, abs_path: str, rel_path: str) -> list[ParsedTag]:
+    # Method to get the tags query for a given language. This method can be overridden in subclasses to provide custom queries for different languages 
+    # not supported by the default implementation
+    def get_tags_query(self, lang: str) -> str:
+        try:
+            with (
+                Path(__file__).resolve().parent / 'queries' / f'tree-sitter-{lang}-tags.scm'
+            ).open('r') as tags_query:
+                return tags_query.read()
+        except FileNotFoundError:
+            return None
+        
+    
+    def get_language(self, abs_path: str) -> str | None:
         lang = filename_to_lang(abs_path)
         if not lang:
-            return []
-
+            return None
+        return lang
+    
+    # If the language is not supported by the tree-sitter-language-pack, we need to provide a custom implementation of this method
+    # to get the language and parser for the given file in a new language
+    def get_language_and_parser(self, lang: str) -> tuple[Language, Parser]:
         ts_language = get_language(lang)
         ts_parser = get_parser(lang)
+        return ts_language, ts_parser
 
-        tags_file_path = (
-            Path(__file__).resolve().parent / 'queries' / f'tree-sitter-{lang}-tags.scm'
-        )
-        if not tags_file_path.exists():
+    def get_tags_raw(self, abs_path: str, rel_path: str) -> list[ParsedTag]:
+        try:
+            with Path(abs_path).open('r') as file:
+                code = file.read()
+            if not code:
+                return []
+        except FileNotFoundError:
             return []
-        tags_query = tags_file_path.read_text()
-
-        if not Path(abs_path).exists():
+    
+        lang = self.get_language(abs_path)
+        if not lang:
             return []
-        code = read_text(abs_path)
-        if not code:
+        
+        tags_query = self.get_tags_query(lang)
+        if tags_query is None:
             return []
-
+        
+        ts_language, ts_parser = self.get_language_and_parser(lang)
         parsed_tree = ts_parser.parse(bytes(code, 'utf-8'))
 
         # Run the tags queries
@@ -78,7 +105,7 @@ class TreeSitterParser:
         captures = query.captures(parsed_tree.root_node)
 
         parsed_tags = []
-        for node, tag_str in captures:
+        for tag_str, nodes in captures.items():
             if tag_str.startswith('name.definition.'):
                 tag_kind = TagKind.DEF
             elif tag_str.startswith('name.reference.'):
@@ -86,16 +113,16 @@ class TreeSitterParser:
             else:
                 # Skip other tags
                 continue
-
-            result_tag = ParsedTag(
-                rel_path=rel_path,
-                abs_path=abs_path,
-                start_line=node.start_point[0],
-                node_name=node.text.decode(
-                    'utf-8'
-                ),  # node_name is defined in the query file
-                tag_kind=tag_kind,
-            )
-            parsed_tags.append(result_tag)
+            for node in nodes:
+                result_tag = ParsedTag(
+                    rel_path=rel_path,
+                    abs_path=abs_path,
+                    start_line=node.start_point[0],
+                    node_name=node.text.decode(
+                        'utf-8'
+                    ),  # node_name is defined in the query file
+                    tag_kind=tag_kind,
+                )
+                parsed_tags.append(result_tag)
 
         return parsed_tags

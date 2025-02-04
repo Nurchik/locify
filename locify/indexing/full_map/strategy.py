@@ -7,7 +7,7 @@ from tqdm import tqdm
 from locify.indexing.prompts import Prompts
 from locify.tree_sitter.parser import ParsedTag, TagKind, TreeSitterParser
 from locify.utils.chat_history import get_file_mentions, get_identifier_mentions
-from locify.utils.file import GitRepoUtils, get_modified_time, read_text
+from locify.utils.file import GitRepoUtils, get_modified_time, read_text, GitRepoUtilsStub
 from locify.utils.llm import get_token_count_from_text
 from locify.utils.path import PathUtils
 
@@ -19,6 +19,10 @@ class FullMapStrategy:
         root='./',
         max_map_token=1024 * 3,
         content_prefix=Prompts.repo_content_prefix,
+        # this parameter controls whether to add parent context to the lines of interest when rendering the tree as a map
+        #  (i.e. 10 lines of the function or class definition). If disabled, the map will be more concise and focused on the lines of interest.
+        add_parent_context_to_map=True,
+        no_git=False,
     ) -> None:
         if not Path(root).is_absolute():
             root = str(Path(root).resolve())
@@ -27,8 +31,12 @@ class FullMapStrategy:
         self.model_name = model_name
         self.max_map_token = max_map_token
         self.content_prefix = content_prefix
+        self.add_parent_context_to_map = add_parent_context_to_map
 
-        self.git_utils = GitRepoUtils(root)
+        if no_git:
+            self.git_utils = GitRepoUtilsStub(root)
+        else:
+            self.git_utils = GitRepoUtils(root)
         self.path_utils = PathUtils(root)
         self.ts_parser = TreeSitterParser(self.root)
 
@@ -85,6 +93,17 @@ class FullMapStrategy:
         tree_repr = self.tags_to_tree(ranked_tags)
         # print(f'Getting map took {time.time() - t0:.2f}s')
         return self.content_prefix + tree_repr
+    
+    def get_map_for_file(self, file_path: str) -> str:
+        if not Path(file_path).is_absolute():
+            file_path = str(Path(self.root).joinpath(file_path))
+
+        ranked_tags = self.get_ranked_tags(
+            _all_abs_files=[file_path],
+        )
+        tree_repr = self.tags_to_tree(ranked_tags)
+        # print(f'Getting map took {time.time() - t0:.2f}s')
+        return self.content_prefix + tree_repr
 
     def get_map_with_token_count(
         self,
@@ -104,10 +123,13 @@ class FullMapStrategy:
         rel_dir_path: str | None = None,
         mentioned_rel_files: set | None = None,
         mentioned_idents: set | None = None,
+        _all_abs_files: list[str] | None = None,
     ) -> list[ParsedTag]:
         # TODO: Implement higher ranking for mentioned files and identifiers
-
-        if rel_dir_path:
+        
+        if _all_abs_files is not None:
+            all_abs_files = _all_abs_files
+        elif rel_dir_path:
             all_abs_files = self.git_utils.get_absolute_tracked_files_in_directory(
                 rel_dir_path=rel_dir_path,
                 depth=depth,
@@ -189,6 +211,7 @@ class FullMapStrategy:
                 loi_pad=0,
                 # header_max=30,
                 show_top_of_file_parent_scope=False,
+                parent_context=self.add_parent_context_to_map,
             )
             self.file_context_cache[rel_file] = {'context': context, 'mtime': mtime}
         else:

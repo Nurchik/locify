@@ -10,10 +10,11 @@ packages = [
 ]
 
 [tool.poetry.dependencies]
-python = "^3.12"
+python = ">=3.10"
 litellm = "*"
-tree-sitter = "0.21.3"
-grep-ast = "0.3.3"
+tree-sitter = ">=0.22.0"
+# install from local directory
+grep-ast = { git = "https://github.com/Nurchik/grep-ast.git" }
 gitpython = "*"
 networkx = "*"
 numpy = "*"

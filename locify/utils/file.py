@@ -146,6 +146,11 @@ class GitRepoUtils:
         # Build and return the tree string
         tree = build_tree(list(tracked_files))
         return build_tree_string(tree)
+    
+
+class GitRepoUtilsStub(GitRepoUtils):
+    def __init__(self, abs_repo_path: str) -> None:
+        self.repo_path = Path(abs_repo_path)
 
 
 def get_modified_time(abs_path: str) -> int:
